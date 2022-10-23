@@ -45,5 +45,3 @@ void screen_draw() {
 }
 
 ```
-
-![example](ESP32_TFT_TESTS.jpg)
