@@ -9,6 +9,8 @@ My ESP32 can not allocate all the memory needed to render a 320x240 colored TFT 
 
 ![example](ESP32_TFT_TESTS.jpg)
 
+![example_pins](ExampleESP32.jpg)
+
 The code on softraster/softraster/softraster.h is rendering by Y axis and after the line is rendered it will call the callback function (`texture_t<COLOR>::lineWritedCb`) or copy to the original buffer (for some testing purposes)
 
 Draw line on the TFT screen callback
