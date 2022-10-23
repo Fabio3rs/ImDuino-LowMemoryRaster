@@ -11,7 +11,7 @@ Originals (submodule in directory named imgui)
 ### Motivation
 My ESP32 can not allocate all the memory needed to render a 320x240 colored TFT screen, rendering by line allows using a smaller buffer size because every line it is sent to the screen and the buffer reused for the next line
 
-The code on softraster/softraster/softraster.h is rendering by Y axis and after the line is rendered it will call the callback function (`texture_t<COLOR>::lineWritedCb`) or copy to the original buffer (for some testing purposes)
+The code on softraster/softraster.h is rendering by Y axis and after the line is rendered it will call the callback function (`texture_t<COLOR>::lineWritedCb`) or copy to the original buffer (for some testing purposes)
 
 Draw line on the TFT screen callback
 ```cpp
