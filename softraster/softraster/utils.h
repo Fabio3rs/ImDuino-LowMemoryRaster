@@ -7,6 +7,7 @@
 #endif
 
 #include "defines.h"
+#include <cstdint>
 
 template<typename T>
 struct range_t

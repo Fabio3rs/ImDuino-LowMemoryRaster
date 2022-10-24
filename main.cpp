@@ -1,89 +1,53 @@
+#ifdef __x86_64
+/*
+ * @brief this file is for test the code on the PC
+ */
+
 #include "imgui.h"
+#include <algorithm>
+#include <array>
+#include <cassert>
+#include <chrono>
 #include <cstdint>
+#include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <ios>
+#include <iostream>
+#include <iterator>
+#include <vector>
+
 texture_alpha8_t fontAtlas;
 
-#include <Adafruit_GFX.h>
-#include <Adafruit_ILI9341.h>
-#include <Adafruit_STMPE610.h>
-#include <SPI.h>
-#include <Wire.h>
-
-// Reconfigured for some personal tests
-
 namespace {
-#define STMPE_CS 8
-Adafruit_STMPE610 ts = Adafruit_STMPE610(STMPE_CS);
-#define TFT_CS 5
-#define TFT_DC 4
-Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC);
-
-boolean RecordOn = false;
-
-#define FRAME_X 320
+#define FRAME_X 210
 #define FRAME_Y 240
 
 #define SCREENX FRAME_X
 #define SCREENY FRAME_Y
 
+std::array<uint16_t, FRAME_X * FRAME_Y> pixels;
 texture_color16_t screen;
-ImplSoftRaster<texture_color16_t> implRaster(screen);
-
-void drawRGBBitmap(int16_t x, int16_t y, const unsigned char *bitmap, int16_t w,
-                   int16_t h) {
-    tft.startWrite();
-    for (int16_t j = 0; j < h; j++, y++) {
-        for (int16_t i = 0; i < w; i++) {
-            int32_t pos = (j * w + i);
-            tft.writePixel(x + i, y, ((const unsigned uint16_t *)bitmap)[pos]);
-        }
-    }
-    tft.endWrite();
-}
-
-/*
- * @brief Draws one line
- */
 void drawLineCallback(texture_color16_t &screen, int y, color16_t *Line) {
-    for (int16_t i = 0; i < screen.w; i++) {
-        tft.writePixel(i, y, ((const unsigned uint16_t *)Line)[i]);
-    }
+    const auto *lineData = reinterpret_cast<const uint16_t *>(Line);
+    std::copy(lineData, lineData + FRAME_X, &(pixels[y * FRAME_X]));
 }
+
+ImplSoftRaster implRaster(screen);
 
 void screen_init() {
-    digitalWrite(22, LOW);
-    delay(500);
-    digitalWrite(22, HIGH);
-
-    tft.begin();
-    tft.fillScreen(ILI9341_BLUE);
-    // tft.setFont(Terminal6x8);
-    tft.setRotation(3);
-
-    /*
-     * @brief callback for draw one line
-     */
     screen.lineWritedCb = drawLineCallback;
-
-    screen.init(SCREENX, SCREENY, nullptr); // Sets the raster buffer as nullptr
+    screen.init(SCREENX, SCREENY, nullptr);
 }
 
-void screen_draw() {
-    tft.startWrite();
-    implRaster.ImGui_ImplSoftraster_RenderDrawData(ImGui::GetDrawData());
-    tft.endWrite();
-}
+} // namespace
 
 unsigned long drawTime;
 unsigned long renderTime;
 unsigned long rasterTime;
 
-ImGuiContext *context;
-} // namespace
-
 void setup() {
-    Serial.begin(115200);
-
-    context = ImGui::CreateContext();
+    auto context = ImGui::CreateContext();
 
     implRaster.ImGui_ImplSoftraster_Init(&screen);
 
@@ -147,29 +111,52 @@ void loop() {
     ImGui::SetWindowPos(ImVec2(0.0, 0.0));
     ImGui::SetWindowSize(ImVec2(SCREENX, SCREENY));
 
-    f += 0.05;
-    if (f > 1.0f)
-        f = 0.0f;
+    f = 0.0f;
 
-    unsigned int deltaTime = millis() - t;
-    t += deltaTime;
-
-    deltaTime -= (drawTime + renderTime + rasterTime);
-
-    ImGui::Text("Hardware write time %d ms", drawTime);
-    ImGui::Text("Render time %d ms", renderTime);
-    ImGui::Text("Raster time %d ms", rasterTime);
-    ImGui::Text("Remaining time %d ms", deltaTime);
+    ImGui::Text("Hardware write time %d ms", 10000);
+    ImGui::Text("Render time %d ms", 10000);
+    ImGui::Text("Raster time %d ms", 10000);
+    ImGui::Text("Remaining time %d ms", 10000);
     ImGui::SliderFloat("SliderFloat", &f, 0.0f, 1.0f);
 
-    renderTime = millis();
     ImGui::Render();
-    renderTime = millis() - renderTime;
 
     //  tft.startWrite();
-    rasterTime = millis();
-    drawTime = millis();
-    screen_draw();
-    drawTime = millis() - drawTime;
-    rasterTime = millis() - rasterTime;
+    implRaster.ImGui_ImplSoftraster_RenderDrawData(ImGui::GetDrawData());
+    // tft.endWrite();
 }
+
+int main() {
+    setup();
+
+    loop();
+
+    std::ifstream comparison(std::filesystem::path(MAINSRCDIR) / "tests" /
+                                 "compare.data",
+                             std::ios::binary | std::ios::in);
+    comparison >> std::noskipws;
+    assert(comparison.is_open());
+    std::istreambuf_iterator itIn(comparison);
+
+    std::vector<uint16_t> data;
+    {
+        std::vector<char> datatmp(itIn, {});
+        data.assign(reinterpret_cast<uint16_t *>(datatmp.data()),
+                    reinterpret_cast<uint16_t *>(datatmp.data()) +
+                        datatmp.size() / sizeof(uint16_t));
+    }
+    // std::copy(itIn, {}, outtest);
+
+    std::cout << "data size " << data.size() << " pixels size " << pixels.size()
+              << std::endl;
+
+    std::fstream dump("dump.data",
+                      std::ios::out | std::ios::trunc | std::ios::binary);
+    dump.write(reinterpret_cast<const char *>(pixels.data()),
+               screen.size * screen.h * screen.w);
+               
+    assert(data.size() == pixels.size());
+    assert(std::equal(data.begin(), data.end(), pixels.begin()));
+}
+
+#endif
