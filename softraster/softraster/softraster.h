@@ -69,8 +69,7 @@ void renderQuadCore(SCREEN *screen, const texture_t<TEXTURE> &tex,
     } else {
         if (alphaBlend) {
             float v = startv;
-            POS y = ry.min;
-            while (y < ry.max) {
+            if (y >= ry.min && y < ry.max) {
                 float u = startu;
                 POS x = rx.min;
                 while (x < rx.max) {
@@ -83,8 +82,7 @@ void renderQuadCore(SCREEN *screen, const texture_t<TEXTURE> &tex,
             }
         } else {
             float v = startv;
-            POS y = ry.min;
-            while (y < ry.max) {
+            if (y >= ry.min && y < ry.max) {
                 float u = startu;
                 POS x = rx.min;
                 while (x < rx.max) {
