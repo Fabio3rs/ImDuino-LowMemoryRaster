@@ -1,4 +1,8 @@
 #pragma once
+#include <cstddef>
+#include <memory>
+#include <utility>
+#include <vector>
 #ifndef SOFTRASTER_H
 #define SOFTRASTER_H
 
@@ -15,12 +19,73 @@
 #include <cstring>
 #include <iostream>
 
-template <class SCREEN> struct SoftRaster {
+template <typename POS_T, class SCREEN> struct SoftRaster {
     texture_t<SCREEN> *pscreen;
     SCREEN *pLine;
 
+    template <typename POS> struct raiiRender {
+        void (*render)(void *, SCREEN *screen, POS y){};
+        void (*cleanup)(void *){};
+        void *ptr{};
+
+        void renderThis(SCREEN *screen, POS y) { render(ptr, screen, y); }
+
+        raiiRender() = default;
+
+        raiiRender &operator=(raiiRender &&other) {
+            if (this == std::addressof(other)) {
+                return *this;
+            }
+
+            ptr = other.ptr;
+            cleanup = other.cleanup;
+            render = other.render;
+
+            other.ptr = nullptr;
+            other.cleanup = nullptr;
+            other.render = nullptr;
+
+            return *this;
+        }
+
+        raiiRender(raiiRender &&other) { *this = std::move(other); }
+
+        raiiRender(const raiiRender &) = delete;
+        raiiRender &operator=(const raiiRender &) = delete;
+
+        template <class T> T &create() {
+            auto *concretePtr = new T;
+            ptr = concretePtr;
+
+            cleanup = [](void *objPtr) {
+                auto *realPtr = reinterpret_cast<T *>(objPtr);
+                delete realPtr;
+            };
+
+            render = [](void *objPtr, SCREEN *screen, POS y) {
+                auto *realPtr = reinterpret_cast<T *>(objPtr);
+
+                realPtr->render(screen, y);
+            };
+
+            return *concretePtr;
+        }
+
+        ~raiiRender() {
+            if (cleanup && ptr) {
+                cleanup(ptr);
+
+                ptr = nullptr;
+                cleanup = nullptr;
+            }
+        }
+    };
+
+    std::vector<raiiRender<POS_T>> renderer;
+
     SoftRaster() = default;
-    SoftRaster(texture_t<SCREEN> &usingScreen) : pscreen(&usingScreen) {}
+    SoftRaster(texture_t<SCREEN> &usingScreen, POS_T /*pos*/)
+        : pscreen(&usingScreen) {}
 
     template <typename POS, typename TEXTURE, typename COLOR> struct QuadCfg {
         float startu;
@@ -34,7 +99,7 @@ template <class SCREEN> struct SoftRaster {
         bool alphaBlend;
         bool blit;
 
-        void render(SCREEN *screen, POS y) {
+        void render(SCREEN *screen, POS y) const {
             const auto &tex = *ptex;
             if (blit) {
                 const POS u = startu - rx.min;
@@ -92,7 +157,7 @@ template <class SCREEN> struct SoftRaster {
         range_t<POS> rx;
         bool alphaBlend;
 
-        void render(SCREEN *screen, POS y) {
+        void render(SCREEN *screen, POS y) const {
             const range_t<POS> ry = inl_min({quad.p1.y, quad.p2.y}, clip.y);
 
             if (y < ry.min && y >= ry.max) {
@@ -126,7 +191,7 @@ template <class SCREEN> struct SoftRaster {
         bary_t<POS, COLOR> bary;
         bool alphaBlend;
 
-        void render(SCREEN *screen, POS y) {
+        void render(SCREEN *screen, POS y) const {
             const auto &tex = *ptex;
             if (alphaBlend) {
                 const range_t<POS> ry = inl_min(rY, clip.y);
@@ -172,141 +237,6 @@ template <class SCREEN> struct SoftRaster {
         }
     };
 
-    template <typename POS, typename TEXTURE, typename COLOR>
-    void renderQuadCore(const texture_t<TEXTURE> &tex, const clip_t<POS> &clip,
-                        const rectangle_t<POS, COLOR> &quad,
-                        const bool alphaBlend, POS currentY) {
-        if ((quad.p2.x < clip.x.min) || (quad.p2.y < clip.y.min) ||
-            (quad.p1.x >= clip.x.max) || (quad.p1.y >= clip.y.max))
-            return;
-
-        POS y = currentY;
-        const range_t<POS> qy = {quad.p1.y, quad.p2.y};
-
-        const range_t<POS> ry = inl_min(qy, clip.y);
-
-        if (y < ry.min && y >= ry.max) {
-            return;
-        }
-
-        const range_t<float> qv = {
-            inl_max((float)quad.p1.v * tex.h, 0.0f),
-            inl_min((float)quad.p2.v * tex.h, (float)tex.h)};
-
-        const range_t<POS> qx = {quad.p1.x, quad.p2.x};
-        const range_t<POS> rx = inl_min(qx, clip.x);
-
-        const range_t<float> qu = {
-            inl_max((float)quad.p1.u * tex.w, 0.0f),
-            inl_min((float)quad.p2.u * tex.w, (float)tex.w)};
-
-        const float duDx = (qu.max - qu.min) / (qx.max - qx.min);
-        const float dvDy = (qv.max - qv.min) / (qy.max - qy.min);
-
-        const float xoffset = (float)rx.min - (float)qx.min;
-        const float yoffset = (float)ry.min - (float)qy.min;
-
-        const float startu = qu.min + (xoffset > 0 ? duDx * xoffset : 0);
-        const float startv = qv.min + (yoffset > 0 ? dvDy * yoffset : 0);
-
-        bool blit = ((duDx == 1.0f) && (dvDy == 1.0f));
-
-        QuadCfg<POS, TEXTURE, COLOR> quadObj;
-
-        quadObj.quad = quad;
-        quadObj.blit = blit;
-        quadObj.duDx = duDx;
-        quadObj.dvDy = dvDy;
-        quadObj.rx = rx;
-        quadObj.ry = ry;
-        quadObj.startu = startu;
-        quadObj.startv = startv;
-        quadObj.alphaBlend = alphaBlend;
-        quadObj.ptex = &tex;
-
-        quadObj.render(pLine, y);
-    }
-
-    template <typename POS, typename COLOR>
-    void renderQuadCore(const clip_t<POS> &clip,
-                        const rectangle_t<POS, COLOR> &quad,
-                        const bool alphaBlend, POS currentY) {
-        if ((quad.p2.x < clip.x.min) || (quad.p2.y < clip.y.min) ||
-            (quad.p1.x >= clip.x.max) || (quad.p1.y >= clip.y.max))
-            return;
-        const range_t<POS> ry = inl_min({quad.p1.y, quad.p2.y}, clip.y);
-
-        POS y = currentY;
-
-        const range_t<POS> rx = inl_min({quad.p1.x, quad.p2.x}, clip.x);
-
-        QuadCore<POS, COLOR> quadData;
-
-        quadData.quad = quad;
-        quadData.clip = clip;
-        quadData.rx = rx;
-        quadData.alphaBlend = alphaBlend;
-
-        quadData.render(pLine, y);
-    }
-
-    template <typename POS, typename COLOR>
-    void renderQuad(SCREEN *screen, const texture_base_t *tex,
-                    const clip_t<POS> &clip,
-                    const rectangle_t<POS, COLOR> &quad, const bool alphaBlend,
-                    POS currentY) {
-        switch (tex == nullptr ? texture_type_t::NONE : tex->type) {
-        case texture_type_t::ALPHA8:
-            renderQuadCore(*reinterpret_cast<const texture_alpha8_t *>(tex),
-                           clip, quad, alphaBlend, currentY);
-            break;
-
-        case texture_type_t::VALUE8:
-            renderQuadCore(*reinterpret_cast<const texture_value8_t *>(tex),
-                           clip, quad, alphaBlend, currentY);
-            break;
-
-        case texture_type_t::COLOR16:
-            renderQuadCore(*reinterpret_cast<const texture_color16_t *>(tex),
-                           clip, quad, alphaBlend, currentY);
-            break;
-
-        case texture_type_t::COLOR24:
-            renderQuadCore(*reinterpret_cast<const texture_color24_t *>(tex),
-                           clip, quad, alphaBlend, currentY);
-            break;
-
-        case texture_type_t::COLOR32:
-            renderQuadCore(*reinterpret_cast<const texture_color32_t *>(tex),
-                           clip, quad, alphaBlend, currentY);
-            break;
-
-        default:
-            renderQuadCore(clip, quad, alphaBlend, currentY);
-            break;
-        }
-    }
-
-    template <typename POS, typename TEXTURE, typename COLOR>
-    void renderTriCore(const texture_t<TEXTURE> &tex, const clip_t<POS> &clip,
-                       const range_t<POS> &rY, const range_t<POS> &rX1,
-                       const range_t<POS> &rX2, const bary_t<POS, COLOR> &bary,
-                       const bool alphaBlend, POS currentY) {
-        POS y = currentY;
-
-        TriCore<POS, TEXTURE, COLOR> core;
-
-        core.alphaBlend = alphaBlend;
-        core.ptex = &tex;
-        core.rY = rY;
-        core.rX1 = rX1;
-        core.rX2 = rX2;
-        core.bary = bary;
-        core.clip = clip;
-
-        core.render(pLine, y);
-    }
-
     template <typename POS, typename COLOR> struct TriCoreColor {
         clip_t<POS> clip;
         range_t<POS> rY;
@@ -315,7 +245,7 @@ template <class SCREEN> struct SoftRaster {
         bary_t<POS, COLOR> bary;
         bool uvBlend, alphaBlend;
 
-        void render(SCREEN *screen, POS y) {
+        void render(SCREEN *screen, POS y) const {
             if (uvBlend) {
                 if (alphaBlend) {
                     const range_t<POS> ry = inl_min(rY, clip.y);
@@ -384,12 +314,141 @@ template <class SCREEN> struct SoftRaster {
         }
     };
 
+    template <typename POS, typename TEXTURE, typename COLOR>
+    void renderQuadCore(const texture_t<TEXTURE> &tex, const clip_t<POS> &clip,
+                        const rectangle_t<POS, COLOR> &quad,
+                        const bool alphaBlend) {
+        if ((quad.p2.x < clip.x.min) || (quad.p2.y < clip.y.min) ||
+            (quad.p1.x >= clip.x.max) || (quad.p1.y >= clip.y.max))
+            return;
+
+        const range_t<POS> qy = {quad.p1.y, quad.p2.y};
+
+        const range_t<POS> ry = inl_min(qy, clip.y);
+
+        const range_t<float> qv = {
+            inl_max((float)quad.p1.v * tex.h, 0.0f),
+            inl_min((float)quad.p2.v * tex.h, (float)tex.h)};
+
+        const range_t<POS> qx = {quad.p1.x, quad.p2.x};
+        const range_t<POS> rx = inl_min(qx, clip.x);
+
+        const range_t<float> qu = {
+            inl_max((float)quad.p1.u * tex.w, 0.0f),
+            inl_min((float)quad.p2.u * tex.w, (float)tex.w)};
+
+        const float duDx = (qu.max - qu.min) / (qx.max - qx.min);
+        const float dvDy = (qv.max - qv.min) / (qy.max - qy.min);
+
+        const float xoffset = (float)rx.min - (float)qx.min;
+        const float yoffset = (float)ry.min - (float)qy.min;
+
+        const float startu = qu.min + (xoffset > 0 ? duDx * xoffset : 0);
+        const float startv = qv.min + (yoffset > 0 ? dvDy * yoffset : 0);
+
+        bool blit = ((duDx == 1.0f) && (dvDy == 1.0f));
+
+        renderer.emplace_back();
+        raiiRender<POS> &raii = renderer.back();
+        auto &quadObj = raii.template create<QuadCfg<POS, TEXTURE, COLOR>>();
+
+        quadObj.quad = quad;
+        quadObj.blit = blit;
+        quadObj.duDx = duDx;
+        quadObj.dvDy = dvDy;
+        quadObj.rx = rx;
+        quadObj.ry = ry;
+        quadObj.startu = startu;
+        quadObj.startv = startv;
+        quadObj.alphaBlend = alphaBlend;
+        quadObj.ptex = &tex;
+    }
+
+    template <typename POS, typename COLOR>
+    void renderQuadCore(const clip_t<POS> &clip,
+                        const rectangle_t<POS, COLOR> &quad,
+                        const bool alphaBlend) {
+        if ((quad.p2.x < clip.x.min) || (quad.p2.y < clip.y.min) ||
+            (quad.p1.x >= clip.x.max) || (quad.p1.y >= clip.y.max))
+            return;
+        const range_t<POS> ry = inl_min({quad.p1.y, quad.p2.y}, clip.y);
+
+        const range_t<POS> rx = inl_min({quad.p1.x, quad.p2.x}, clip.x);
+
+        renderer.emplace_back();
+        raiiRender<POS> &raii = renderer.back();
+        auto &quadData = raii.template create<QuadCore<POS, COLOR>>();
+
+        quadData.quad = quad;
+        quadData.clip = clip;
+        quadData.rx = rx;
+        quadData.alphaBlend = alphaBlend;
+    }
+
+    template <typename POS, typename COLOR>
+    void renderQuad(SCREEN *screen, const texture_base_t *tex,
+                    const clip_t<POS> &clip,
+                    const rectangle_t<POS, COLOR> &quad,
+                    const bool alphaBlend) {
+        switch (tex == nullptr ? texture_type_t::NONE : tex->type) {
+        case texture_type_t::ALPHA8:
+            renderQuadCore(*reinterpret_cast<const texture_alpha8_t *>(tex),
+                           clip, quad, alphaBlend);
+            break;
+
+        case texture_type_t::VALUE8:
+            renderQuadCore(*reinterpret_cast<const texture_value8_t *>(tex),
+                           clip, quad, alphaBlend);
+            break;
+
+        case texture_type_t::COLOR16:
+            renderQuadCore(*reinterpret_cast<const texture_color16_t *>(tex),
+                           clip, quad, alphaBlend);
+            break;
+
+        case texture_type_t::COLOR24:
+            renderQuadCore(*reinterpret_cast<const texture_color24_t *>(tex),
+                           clip, quad, alphaBlend);
+            break;
+
+        case texture_type_t::COLOR32:
+            renderQuadCore(*reinterpret_cast<const texture_color32_t *>(tex),
+                           clip, quad, alphaBlend);
+            break;
+
+        default:
+            renderQuadCore(clip, quad, alphaBlend);
+            break;
+        }
+    }
+
+    template <typename POS, typename TEXTURE, typename COLOR>
+    void renderTriCore(const texture_t<TEXTURE> &tex, const clip_t<POS> &clip,
+                       const range_t<POS> &rY, const range_t<POS> &rX1,
+                       const range_t<POS> &rX2, const bary_t<POS, COLOR> &bary,
+                       const bool alphaBlend) {
+        renderer.emplace_back();
+        raiiRender<POS> &raii = renderer.back();
+        auto &core = raii.template create<TriCore<POS, TEXTURE, COLOR>>();
+
+        core.alphaBlend = alphaBlend;
+        core.ptex = &tex;
+        core.rY = rY;
+        core.rX1 = rX1;
+        core.rX2 = rX2;
+        core.bary = bary;
+        core.clip = clip;
+    }
+
     template <typename POS, typename COLOR>
     void renderTriCore(const clip_t<POS> &clip, const range_t<POS> &rY,
                        const range_t<POS> &rX1, const range_t<POS> &rX2,
                        const bary_t<POS, COLOR> &bary, const bool uvBlend,
-                       const bool alphaBlend, POS currentY) {
-        TriCoreColor<POS, COLOR> core;
+                       const bool alphaBlend) {
+        renderer.emplace_back();
+        raiiRender<POS> &raii = renderer.back();
+        auto &core = raii.template create<TriCoreColor<POS, COLOR>>();
+
         core.alphaBlend = alphaBlend;
         core.uvBlend = uvBlend;
         core.bary = bary;
@@ -397,8 +456,6 @@ template <class SCREEN> struct SoftRaster {
         core.rX1 = rX1;
         core.rX2 = rX2;
         core.rY = rY;
-
-        core.render(pLine, currentY);
     }
 
     template <typename POS, typename COLOR>
@@ -406,36 +463,35 @@ template <class SCREEN> struct SoftRaster {
                    const clip_t<POS> &clip, const range_t<POS> &rY,
                    const range_t<POS> &rX1, const range_t<POS> &rX2,
                    const bary_t<POS, COLOR> &bary, const bool uvBlend,
-                   const bool alphaBlend, POS currentY) {
+                   const bool alphaBlend) {
         switch (tex == nullptr ? texture_type_t::NONE : tex->type) {
         case texture_type_t::ALPHA8:
             renderTriCore(*reinterpret_cast<const texture_alpha8_t *>(tex),
-                          clip, rY, rX1, rX2, bary, alphaBlend, currentY);
+                          clip, rY, rX1, rX2, bary, alphaBlend);
             break;
 
         case texture_type_t::VALUE8:
             renderTriCore(*reinterpret_cast<const texture_value8_t *>(tex),
-                          clip, rY, rX1, rX2, bary, alphaBlend, currentY);
+                          clip, rY, rX1, rX2, bary, alphaBlend);
             break;
 
         case texture_type_t::COLOR16:
             renderTriCore(*reinterpret_cast<const texture_color16_t *>(tex),
-                          clip, rY, rX1, rX2, bary, alphaBlend, currentY);
+                          clip, rY, rX1, rX2, bary, alphaBlend);
             break;
 
         case texture_type_t::COLOR24:
             renderTriCore(*reinterpret_cast<const texture_color24_t *>(tex),
-                          clip, rY, rX1, rX2, bary, alphaBlend, currentY);
+                          clip, rY, rX1, rX2, bary, alphaBlend);
             break;
 
         case texture_type_t::COLOR32:
             renderTriCore(*reinterpret_cast<const texture_color32_t *>(tex),
-                          clip, rY, rX1, rX2, bary, alphaBlend, currentY);
+                          clip, rY, rX1, rX2, bary, alphaBlend);
             break;
 
         default:
-            renderTriCore(clip, rY, rX1, rX2, bary, uvBlend, alphaBlend,
-                          currentY);
+            renderTriCore(clip, rY, rX1, rX2, bary, uvBlend, alphaBlend);
             break;
         }
     }
@@ -443,7 +499,7 @@ template <class SCREEN> struct SoftRaster {
     template <typename POS, typename COLOR>
     void renderTri(SCREEN *screen, const texture_base_t *tex,
                    const clip_t<POS> &clip, triangle_t<POS, COLOR> &tri,
-                   const bool uvBlend, const bool alphaBlend, POS currentY) {
+                   const bool uvBlend, const bool alphaBlend) {
         if (tri.p1.y > tri.p2.y)
             swap(&(tri.p1), &(tri.p2));
         if (tri.p1.y > tri.p3.y)
@@ -470,8 +526,7 @@ template <class SCREEN> struct SoftRaster {
 
                 renderTri(screen, tex, clip, {tri.p1.y, tri.p1.y + 1},
                           {tri.p1.x, tri.p3.x}, {tri.p1.x, tri.p3.x},
-                          baryPre(tri.p1, tri.p2, tri.p3), uvBlend, alphaBlend,
-                          currentY);
+                          baryPre(tri.p1, tri.p2, tri.p3), uvBlend, alphaBlend);
             } else // Flat bottom triangle
             {
                 if (tri.p2.x > tri.p3.x)
@@ -479,8 +534,7 @@ template <class SCREEN> struct SoftRaster {
 
                 renderTri(screen, tex, clip, {tri.p1.y, tri.p3.y},
                           {tri.p1.x, tri.p1.x}, {tri.p2.x, tri.p3.x},
-                          baryPre(tri.p1, tri.p2, tri.p3), uvBlend, alphaBlend,
-                          currentY);
+                          baryPre(tri.p1, tri.p2, tri.p3), uvBlend, alphaBlend);
             }
         } else if (tri.p1.y == tri.p2.y) // Flat top triangle
         {
@@ -489,8 +543,7 @@ template <class SCREEN> struct SoftRaster {
 
             renderTri(screen, tex, clip, {tri.p1.y, tri.p3.y},
                       {tri.p1.x, tri.p2.x}, {tri.p3.x, tri.p3.x},
-                      baryPre(tri.p1, tri.p2, tri.p3), uvBlend, alphaBlend,
-                      currentY);
+                      baryPre(tri.p1, tri.p2, tri.p3), uvBlend, alphaBlend);
         } else {
             // Find 4th point to split the tri into flat top and flat bottom
             // triangles
@@ -505,20 +558,18 @@ template <class SCREEN> struct SoftRaster {
 
             renderTri(screen, tex, clip, {tri.p1.y, tri.p2.y},
                       {tri.p1.x, tri.p1.x}, {tri.p3.x, p4.x},
-                      baryPre(tri.p1, tri.p2, p4), uvBlend, alphaBlend,
-                      currentY);
+                      baryPre(tri.p1, tri.p2, p4), uvBlend, alphaBlend);
 
             renderTri(screen, tex, clip, {tri.p2.y, tri.p3.y}, {tri.p2.x, p4.x},
                       {tri.p3.x, tri.p3.x}, baryPre(tri.p2, p4, tri.p3),
-                      uvBlend, alphaBlend, currentY);
+                      uvBlend, alphaBlend);
         }
     }
 
     template <typename POS>
     void renderCommand(SCREEN *Line, const texture_base_t *texture,
                        const ImDrawVert *vtx_buffer,
-                       const ImDrawIdx *idx_buffer, const ImDrawCmd &pcmd,
-                       POS currentY) {
+                       const ImDrawIdx *idx_buffer, const ImDrawCmd &pcmd) {
         auto &screen = *pscreen;
 
         const clip_t<POS> clip = {
@@ -595,7 +646,7 @@ template <class SCREEN> struct SoftRaster {
                     const bool alphaBlend = true;
 
                     renderQuad(Line, noUV ? nullptr : texture, clip, quad,
-                               alphaBlend, currentY);
+                               alphaBlend);
 
                     i += 3;
                     continue;
@@ -639,7 +690,7 @@ template <class SCREEN> struct SoftRaster {
             const bool alphaBlend = true;
 
             renderTri(Line, noUV ? nullptr : texture, clip, tri, !flatCol,
-                      alphaBlend, currentY);
+                      alphaBlend);
         }
     }
 
@@ -656,8 +707,17 @@ template <class SCREEN> struct SoftRaster {
 
         auto &screen = *pscreen;
 
-        for (POS y = 0; y < screen.h; y++) {
-            memset(Line, 0, screen.w * sizeof(Line[0]));
+        {
+            size_t objcnt = 0;
+            for (int n = 0; n < drawData->CmdListsCount; n++) {
+                const ImDrawList *cmdList = drawData->CmdLists[n];
+                objcnt += cmdList->CmdBuffer.Size;
+            }
+
+            renderer.reserve(objcnt);
+        }
+
+        {
             for (int n = 0; n < drawData->CmdListsCount; n++) {
                 const ImDrawList *cmdList = drawData->CmdLists[n];
                 const ImDrawVert *vtx_buffer = cmdList->VtxBuffer.Data;
@@ -672,10 +732,18 @@ template <class SCREEN> struct SoftRaster {
                             Line,
                             reinterpret_cast<const texture_base_t *>(
                                 pcmd.TextureId),
-                            vtx_buffer, idx_buffer, pcmd, y);
+                            vtx_buffer, idx_buffer, pcmd);
                     }
                     idx_buffer += pcmd.ElemCount;
                 }
+            }
+        }
+
+        for (POS y = 0; y < screen.h; y++) {
+            memset(Line, 0, screen.w * sizeof(Line[0]));
+
+            for (auto &obj : renderer) {
+                obj.renderThis(Line, y);
             }
 
             if (screen.lineWritedCb != nullptr) {

@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 #ifndef IMGUI_IMPL_SOFTRASTER_H
 #define IMGUI_IMPL_SOFTRASTER_H
 
@@ -7,9 +8,9 @@
 #include "softraster/texture.h"
 
 template <class T> struct ImplSoftRaster {
-    T *Screen{};
+    texture_t<T> *Screen{};
 
-    bool ImGui_ImplSoftraster_Init(T *screen) {
+    bool ImGui_ImplSoftraster_Init(texture_t<T> *screen) {
         if (screen != nullptr) {
             Screen = screen;
             return true;
@@ -35,11 +36,11 @@ template <class T> struct ImplSoftRaster {
         }
 
         Screen->clear();
-        SoftRaster raster(*Screen);
+        SoftRaster<int32_t, T> raster(*Screen, int32_t{});
         raster.template renderDrawLists<int32_t>(draw_data);
     }
 
-    explicit constexpr ImplSoftRaster(T &screen) : Screen(&screen) {}
+    explicit constexpr ImplSoftRaster(texture_t<T> &screen) : Screen(&screen) {}
     ImplSoftRaster() = default;
 };
 

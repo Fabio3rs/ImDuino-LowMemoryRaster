@@ -122,7 +122,14 @@ void loop() {
     ImGui::Render();
 
     //  tft.startWrite();
+    auto now = std::chrono::high_resolution_clock::now();
     implRaster.ImGui_ImplSoftraster_RenderDrawData(ImGui::GetDrawData());
+    auto end = std::chrono::high_resolution_clock::now();
+
+    std::cout << std::chrono::duration_cast<std::chrono::microseconds>(
+                     (end - now))
+                     .count()
+              << std::endl;
     // tft.endWrite();
 }
 
@@ -154,7 +161,7 @@ int main() {
                       std::ios::out | std::ios::trunc | std::ios::binary);
     dump.write(reinterpret_cast<const char *>(pixels.data()),
                screen.size * screen.h * screen.w);
-               
+
     assert(data.size() == pixels.size());
     assert(std::equal(data.begin(), data.end(), pixels.begin()));
 }

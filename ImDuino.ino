@@ -1,4 +1,5 @@
 #include "imgui.h"
+#include "softraster/softraster/color.h"
 #include <cstdint>
 texture_alpha8_t fontAtlas;
 
@@ -26,7 +27,7 @@ boolean RecordOn = false;
 #define SCREENY FRAME_Y
 
 texture_color16_t screen;
-ImplSoftRaster<texture_color16_t> implRaster(screen);
+ImplSoftRaster<color16_t> implRaster(screen);
 
 void drawRGBBitmap(int16_t x, int16_t y, const unsigned char *bitmap, int16_t w,
                    int16_t h) {
