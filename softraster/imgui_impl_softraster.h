@@ -35,7 +35,8 @@ template <class T> struct ImplSoftRaster {
         }
 
         Screen->clear();
-        renderDrawLists<int32_t>(draw_data, *reinterpret_cast<T *>(Screen));
+        SoftRaster raster(*Screen);
+        raster.template renderDrawLists<int32_t>(draw_data);
     }
 
     explicit constexpr ImplSoftRaster(T &screen) : Screen(&screen) {}
