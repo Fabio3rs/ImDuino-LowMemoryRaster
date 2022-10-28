@@ -1,5 +1,6 @@
 #pragma once
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -22,66 +23,6 @@
 template <typename POS_T, class SCREEN> struct SoftRaster {
     texture_t<SCREEN> *pscreen;
     SCREEN *pLine;
-
-    template <typename POS> struct raiiRender {
-        void (*render)(void *, SCREEN *screen, POS y){};
-        void (*cleanup)(void *){};
-        void *ptr{};
-
-        void renderThis(SCREEN *screen, POS y) { render(ptr, screen, y); }
-
-        raiiRender() = default;
-
-        raiiRender &operator=(raiiRender &&other) {
-            if (this == std::addressof(other)) {
-                return *this;
-            }
-
-            ptr = other.ptr;
-            cleanup = other.cleanup;
-            render = other.render;
-
-            other.ptr = nullptr;
-            other.cleanup = nullptr;
-            other.render = nullptr;
-
-            return *this;
-        }
-
-        raiiRender(raiiRender &&other) { *this = std::move(other); }
-
-        raiiRender(const raiiRender &) = delete;
-        raiiRender &operator=(const raiiRender &) = delete;
-
-        template <class T> T &create() {
-            auto *concretePtr = new T;
-            ptr = concretePtr;
-
-            cleanup = [](void *objPtr) {
-                auto *realPtr = reinterpret_cast<T *>(objPtr);
-                delete realPtr;
-            };
-
-            render = [](void *objPtr, SCREEN *screen, POS y) {
-                auto *realPtr = reinterpret_cast<T *>(objPtr);
-
-                realPtr->render(screen, y);
-            };
-
-            return *concretePtr;
-        }
-
-        ~raiiRender() {
-            if (cleanup && ptr) {
-                cleanup(ptr);
-
-                ptr = nullptr;
-                cleanup = nullptr;
-            }
-        }
-    };
-
-    std::vector<raiiRender<POS_T>> renderer;
 
     SoftRaster() = default;
     SoftRaster(texture_t<SCREEN> &usingScreen, POS_T /*pos*/)
@@ -313,6 +254,87 @@ template <typename POS_T, class SCREEN> struct SoftRaster {
             }
         }
     };
+
+    union rendererMem_t {
+        TriCoreColor<uint32_t, color32_t> triColor;
+        TriCore<int32_t, color32_t, color32_t> triText;
+        QuadCore<int32_t, color32_t> quadColor;
+        QuadCfg<int32_t, color32_t, color32_t> quadText;
+    };
+
+    template <typename POS> struct raiiRender {
+        void (*render)(void *, SCREEN *screen, POS y){};
+        void (*cleanup)(void *){};
+        void (*moveContent)(void *to, void *from){};
+        uint8_t memory[sizeof(rendererMem_t)];
+
+        void renderThis(SCREEN *screen, POS y) { render(memory, screen, y); }
+
+        raiiRender() = default;
+
+        raiiRender &operator=(raiiRender &&other) {
+            if (this == std::addressof(other)) {
+                return *this;
+            }
+
+            if (other.moveContent) {
+                other.moveContent(memory, other.memory);
+            } else {
+                memmove(memory, other.memory, sizeof(memory));
+            }
+
+            cleanup = other.cleanup;
+            render = other.render;
+
+            other.moveContent = nullptr;
+            other.cleanup = nullptr;
+            other.render = nullptr;
+
+            return *this;
+        }
+
+        raiiRender(raiiRender &&other) { *this = std::move(other); }
+
+        raiiRender(const raiiRender &) = delete;
+        raiiRender &operator=(const raiiRender &) = delete;
+
+        template <class T> T &create() {
+            static_assert(sizeof(T) <= sizeof(memory), "doesn't have memory");
+            auto *concretePtr = reinterpret_cast<T *>(memory);
+
+            new (concretePtr) T();
+
+            cleanup = [](void *objPtr) {
+                auto &realPtr = *reinterpret_cast<T *>(objPtr);
+                realPtr.~T();
+            };
+
+            render = [](void *objPtr, SCREEN *screen, POS y) {
+                auto *realPtr = reinterpret_cast<T *>(objPtr);
+
+                realPtr->render(screen, y);
+            };
+
+            moveContent = [](void *to, void *from) {
+                auto *realTo = reinterpret_cast<T *>(to);
+                auto *realFrom = reinterpret_cast<T *>(from);
+
+                *realTo = std::move(*realFrom);
+            };
+
+            return *concretePtr;
+        }
+
+        ~raiiRender() {
+            if (cleanup) {
+                cleanup(memory);
+                moveContent = nullptr;
+                cleanup = nullptr;
+            }
+        }
+    };
+
+    std::vector<raiiRender<POS_T>> renderer;
 
     template <typename POS, typename TEXTURE, typename COLOR>
     void renderQuadCore(const texture_t<TEXTURE> &tex, const clip_t<POS> &clip,
@@ -706,6 +728,8 @@ template <typename POS_T, class SCREEN> struct SoftRaster {
         pLine = Line;
 
         auto &screen = *pscreen;
+
+        renderer.clear();
 
         {
             size_t objcnt = 0;

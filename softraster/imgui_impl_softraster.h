@@ -9,6 +9,7 @@
 
 template <class T> struct ImplSoftRaster {
     texture_t<T> *Screen{};
+    SoftRaster<int32_t, T> raster;
 
     bool ImGui_ImplSoftraster_Init(texture_t<T> *screen) {
         if (screen != nullptr) {
@@ -36,7 +37,7 @@ template <class T> struct ImplSoftRaster {
         }
 
         Screen->clear();
-        SoftRaster<int32_t, T> raster(*Screen, int32_t{});
+        raster.pscreen = Screen;
         raster.template renderDrawLists<int32_t>(draw_data);
     }
 
