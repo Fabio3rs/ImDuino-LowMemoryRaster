@@ -46,7 +46,7 @@ void drawRGBBitmap(int16_t x, int16_t y, const unsigned char *bitmap, int16_t w,
  */
 void drawLineCallback(texture_color16_t &screen, int y, color16_t *Line) {
     for (int16_t i = 0; i < screen.w; i++) {
-        tft.writePixel(i, y, ((const unsigned uint16_t *)Line)[i]);
+        tft.SPI_WRITE16(((const unsigned uint16_t *)Line)[i]);
     }
 }
 
@@ -70,6 +70,7 @@ void screen_init() {
 
 void screen_draw() {
     tft.startWrite();
+    tft.setAddrWindow(0, 0, screen.w, screen.h);
     implRaster.ImGui_ImplSoftraster_RenderDrawData(ImGui::GetDrawData());
     tft.endWrite();
 }
