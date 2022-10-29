@@ -105,7 +105,7 @@ template <typename COLOR> struct texture_t : public texture_base_t {
     /*
      * @brief callback for draw a line
      */
-    void (*lineWritedCb)(texture_t<COLOR> &screen, int y, COLOR *Line);
+    void (*lineWritedCb)(texture_t<COLOR> &screen, int y, const COLOR *Line);
 
     inline void init(size_t x, size_t y) {
         if (needFree && pixels != nullptr)

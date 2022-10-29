@@ -44,7 +44,7 @@ void drawRGBBitmap(int16_t x, int16_t y, const unsigned char *bitmap, int16_t w,
 /*
  * @brief Draws one line
  */
-void drawLineCallback(texture_color16_t &screen, int y, color16_t *Line) {
+void drawLineCallback(texture_color16_t &screen, int y, const color16_t *Line) {
     for (int16_t i = 0; i < screen.w; i++) {
         tft.SPI_WRITE16(((const unsigned uint16_t *)Line)[i]);
     }

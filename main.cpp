@@ -28,7 +28,7 @@ namespace {
 
 std::array<uint16_t, FRAME_X * FRAME_Y> pixels;
 texture_color16_t screen;
-void drawLineCallback(texture_color16_t &screen, int y, color16_t *Line) {
+void drawLineCallback(texture_color16_t &screen, int y, const color16_t *Line) {
     const auto *lineData = reinterpret_cast<const uint16_t *>(Line);
     std::copy(lineData, lineData + FRAME_X, &(pixels[y * FRAME_X]));
 }
