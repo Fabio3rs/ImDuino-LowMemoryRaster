@@ -1,0 +1,1 @@
+/usr/bin/c++ -Wl,--dependency-file=CMakeFiles/teste.dir/link.d CMakeFiles/teste.dir/imgui.cpp.o CMakeFiles/teste.dir/main.cpp.o -o teste

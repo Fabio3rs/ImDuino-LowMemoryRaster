@@ -1,0 +1,3 @@
+/home/runner/work/ImDuino-LowMemoryRaster/ImDuino-LowMemoryRaster/build/CMakeFiles/teste.dir
+/home/runner/work/ImDuino-LowMemoryRaster/ImDuino-LowMemoryRaster/build/CMakeFiles/edit_cache.dir
+/home/runner/work/ImDuino-LowMemoryRaster/ImDuino-LowMemoryRaster/build/CMakeFiles/rebuild_cache.dir
