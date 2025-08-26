@@ -21,11 +21,20 @@ This implementation introduces a **line-by-line rendering system** that dramatic
 | 1024×600   | 1,228,800 bytes (~1.2MB) | 2,048 bytes | 1,226,752 bytes | **99.8%** |
 
 ### 🧠 ESP32 Memory Constraints
+
+#### The Contiguous Memory Problem
 - **Total RAM**: ~520KB
 - **Available Heap**: ~320KB (after system overhead)
-- **Traditional 320×240 display**: Uses ~150KB (47% of available memory)
-- **Traditional 480×320 display**: Uses ~300KB (94% of available memory) - **Barely fits!**
-- **Traditional 800×480 display**: Uses ~750KB - **Impossible without external RAM**
+- **Critical Issue**: Even when sufficient total memory exists, the ESP32 **cannot allocate contiguous memory blocks** large enough for traditional framebuffers
+
+| Display Resolution | Required Contiguous Block | Status |
+|-------------------|---------------------------|---------|
+| 320×240 | ~150KB | **Allocation fails** - no contiguous block available |
+| 480×320 | ~300KB | **Impossible** - exceeds largest possible contiguous block |
+| 800×480 | ~750KB | **Impossible** - far exceeds ESP32 capabilities |
+
+#### Why Contiguous Memory Matters
+Traditional framebuffer allocation requires a **single continuous block** of memory. Due to heap fragmentation and ESP32's memory architecture, even when 200KB+ of total free memory exists, the system cannot provide the 150KB contiguous block needed for a 320×240 display.
 
 ![example](ESP32_TFT_TESTS.jpg)
 
@@ -33,20 +42,21 @@ This implementation introduces a **line-by-line rendering system** that dramatic
 
 ## 🔧 Technical Implementation
 
-### How Line-by-Line Rendering Works
+### How Line-by-Line Rendering Solves the Contiguous Memory Problem
 
-The optimization fundamentally changes how the graphics are rendered:
+The optimization fundamentally changes how graphics are rendered to avoid large contiguous allocations:
 
-1. **Traditional Approach**: 
-   - Allocate full framebuffer in RAM: `width × height × bytes_per_pixel`
-   - Render entire frame to memory buffer
-   - Transfer complete frame to display
+1. **Traditional Approach (Fails on ESP32)**:
+   - **Requires**: One large contiguous block: `width × height × bytes_per_pixel`
+   - **320×240 example**: Must find single 153,600-byte contiguous block
+   - **Problem**: ESP32 heap fragmentation prevents large contiguous allocations
+   - **Result**: `malloc()` fails even when total free memory > 150KB
 
-2. **Line-by-Line Approach**:
-   - Allocate small line buffer: `width × 1 × bytes_per_pixel`
-   - Render one line at a time
-   - Immediately send line to display via callback
-   - Reuse same buffer for next line
+2. **Line-by-Line Approach (Works on ESP32)**:
+   - **Requires**: Only small contiguous block: `width × 1 × bytes_per_pixel`
+   - **320×240 example**: Only needs 640-byte contiguous block per line
+   - **Solution**: Small allocations always succeed due to minimal fragmentation
+   - **Result**: Can render displays 4x larger than available contiguous memory
 
 ### Core Components
 

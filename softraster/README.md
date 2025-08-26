@@ -20,8 +20,8 @@ This modified softraster implementation introduces **revolutionary memory optimi
 | 320×240     | 150KB            | 640 bytes        | **99.6%**   |
 | 800×480     | 750KB            | 1.6KB           | **99.8%**   |
 
-### Motivation
-My ESP32 can not allocate all the memory needed to render a 320x240 colored TFT screen, rendering by line allows using a smaller buffer size because every line it is sent to the screen and the buffer reused for the next line.
+### Motivation: The Contiguous Memory Problem
+The ESP32 cannot allocate contiguous memory blocks large enough for traditional framebuffers. Even when sufficient total memory exists (~200KB+ free), the heap fragmentation prevents allocation of the 150KB contiguous block needed for a 320×240 display. The line-by-line rendering approach solves this by requiring only small 640-byte contiguous blocks that can always be allocated successfully.
 
 ### Technical Implementation
 
