@@ -6,3 +6,6 @@ bin/**
 
 *.obj
 *.obuild/
+
+build/**
+.cache/
