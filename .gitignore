@@ -5,4 +5,7 @@ ignore/**
 bin/**
 
 *.obj
-*.o
+*.obuild/
+
+build/**
+.cache/
