@@ -19,7 +19,86 @@
 #include "texture.h"
 #include "utils.h"
 #include <cstring>
+#include <utility>
 // #include <iostream>
+
+namespace {
+#include <stddef.h>
+#include <stdint.h>
+
+static inline uint32_t rotl32(uint32_t x, int r) {
+    return (x << r) | (x >> (32 - r));
+}
+
+// MurmurHash3 x86_32 constants
+static constexpr uint32_t C1 = 0xcc9e2d51u;
+static constexpr uint32_t C2 = 0x1b873593u;
+
+static inline uint32_t murmur_scramble32(uint32_t k) {
+    k *= C1;
+    k = rotl32(k, 15);
+    k *= C2;
+    return k;
+}
+
+// fmix32 finalizer constants
+static inline uint32_t fmix32(uint32_t h) {
+    h ^= h >> 16;
+    h *= 0x85ebca6bu;
+    h ^= h >> 13;
+    h *= 0xc2b2ae35u;
+    h ^= h >> 16;
+    return h;
+}
+
+struct StripeHash32 {
+    uint32_t h = 0;        // estado
+    uint32_t lenBytes = 0; // total alimentado (para mix final)
+
+    void reset(uint32_t seed = 0) {
+        h = seed;
+        lenBytes = 0;
+    }
+
+    // Atualiza com pixels RGB565 (uint16_t). Processa 2 pixels -> 1x uint32_t.
+    void update565(const uint16_t *px, size_t pixelCount) {
+        lenBytes += (uint32_t)(pixelCount * sizeof(uint16_t));
+
+        // Se alinhado em 4 bytes e número par, dá para ler como uint32_t direto
+        if ((((uintptr_t)px & 3u) == 0u) && ((pixelCount & 1u) == 0u)) {
+            const uint32_t *p32 = (const uint32_t *)px;
+            const size_t n32 = pixelCount / 2;
+            for (size_t i = 0; i < n32; ++i) {
+                uint32_t k = p32[i]; // 2 pixels por load
+                h ^= murmur_scramble32(k);
+                h = rotl32(h, 13);
+                h = h * 5u + 0xe6546b64u; // constante do Murmur3_32
+            }
+            return;
+        }
+
+        // Caminho seguro: empacota 2x uint16_t em uint32_t
+        size_t i = 0;
+        for (; i + 1 < pixelCount; i += 2) {
+            uint32_t k = (uint32_t)px[i] | ((uint32_t)px[i + 1] << 16);
+            h ^= murmur_scramble32(k);
+            h = rotl32(h, 13);
+            h = h * 5u + 0xe6546b64u;
+        }
+        // Pixel sobrando (tail de 16 bits)
+        if (i < pixelCount) {
+            uint32_t k = (uint32_t)px[i];
+            h ^= murmur_scramble32(k);
+        }
+    }
+
+    uint32_t finish() const {
+        uint32_t out = h ^ lenBytes; // inclui len no mix final
+        return fmix32(out);
+    }
+};
+
+} // namespace
 
 template <typename POS_T, class SCREEN> struct SoftRaster {
     texture_t<SCREEN> *pscreen;
@@ -757,16 +836,6 @@ template <typename POS_T, class SCREEN> struct SoftRaster {
         }
     }
 
-    static inline uint32_t fnv1a32(const void *data, size_t len) {
-        const uint8_t *p = (const uint8_t *)data;
-        uint32_t h = 2166136261u;
-        for (size_t i = 0; i < len; ++i) {
-            h ^= p[i];
-            h *= 16777619u;
-        }
-        return h;
-    }
-
     template <typename POS>
     void renderDrawLists(ImDrawData *drawData, SCREEN *Line,
                          size_t lineElements, bool useStripe,
@@ -820,10 +889,12 @@ template <typename POS_T, class SCREEN> struct SoftRaster {
         int currentLine = 0;
         int yStripe = 0;
         int currentStripe = 0;
+        StripeHash32 stripeHash;
 
         for (POS y = 0; y < screen.h; y++) {
             if (currentLine == 0) {
                 memset(Line, 0, lineElements * sizeof(Line[0]));
+                stripeHash.reset();
             }
 
             auto *cLine = &Line[currentLine * screen.w];
@@ -832,14 +903,16 @@ template <typename POS_T, class SCREEN> struct SoftRaster {
                 obj.renderThis(cLine, y);
             }
 
+            stripeHash.update565(reinterpret_cast<const uint16_t *>(cLine),
+                                 screen.w);
+
             if (screen.lineWritedCb != nullptr) {
                 if (currentLine == stripeSize - 1) {
                     currentLine = 0;
                     int tmpStripe = currentStripe++;
 
                     if (stripesHashes != nullptr) {
-                        uint32_t hash = fnv1a32(Line, stripeSize * screen.w *
-                                                          sizeof(Line[0]));
+                        uint32_t hash = stripeHash.finish();
                         if (hash == stripesHashes[tmpStripe]) {
                             yStripe = y + 1;
                             continue; // skip unchanged stripe
@@ -861,8 +934,7 @@ template <typename POS_T, class SCREEN> struct SoftRaster {
         }
 
         if (currentLine != 0 && screen.lineWritedCb != nullptr) {
-            uint32_t hash =
-                fnv1a32(Line, currentLine * screen.w * sizeof(Line[0]));
+            uint32_t hash = stripeHash.finish();
 
             if (stripesHashes != nullptr) {
                 int tmpStripe = currentStripe;
