@@ -757,7 +757,20 @@ template <typename POS_T, class SCREEN> struct SoftRaster {
         }
     }
 
-    template <typename POS> void renderDrawLists(ImDrawData *drawData) {
+    static inline uint32_t fnv1a32(const void *data, size_t len) {
+        const uint8_t *p = (const uint8_t *)data;
+        uint32_t h = 2166136261u;
+        for (size_t i = 0; i < len; ++i) {
+            h ^= p[i];
+            h *= 16777619u;
+        }
+        return h;
+    }
+
+    template <typename POS>
+    void renderDrawLists(ImDrawData *drawData, SCREEN *Line,
+                         size_t lineElements, bool useStripe,
+                         uint32_t *stripesHashes = nullptr) {
         ImGuiIO &io = ImGui::GetIO();
         int fbWidth = (int)(io.DisplaySize.x * io.DisplayFramebufferScale.x);
         int fbHeight = (int)(io.DisplaySize.y * io.DisplayFramebufferScale.y);
@@ -765,10 +778,10 @@ template <typename POS_T, class SCREEN> struct SoftRaster {
             return;
         drawData->ScaleClipRects(io.DisplayFramebufferScale);
 
-        SCREEN Line[1024];
         pLine = Line;
 
         auto &screen = *pscreen;
+        int stripeSize = useStripe ? lineElements / screen.w : 1;
 
         renderer.clear();
 
@@ -804,19 +817,63 @@ template <typename POS_T, class SCREEN> struct SoftRaster {
             }
         }
 
+        int currentLine = 0;
+        int yStripe = 0;
+        int currentStripe = 0;
+
         for (POS y = 0; y < screen.h; y++) {
-            memset(Line, 0, screen.w * sizeof(Line[0]));
+            if (currentLine == 0) {
+                memset(Line, 0, lineElements * sizeof(Line[0]));
+            }
+
+            auto *cLine = &Line[currentLine * screen.w];
 
             for (auto &obj : renderer) {
-                obj.renderThis(Line, y);
+                obj.renderThis(cLine, y);
             }
 
             if (screen.lineWritedCb != nullptr) {
-                screen.lineWritedCb(screen, y, Line);
+                if (currentLine == stripeSize - 1) {
+                    currentLine = 0;
+                    int tmpStripe = currentStripe++;
+
+                    if (stripesHashes != nullptr) {
+                        uint32_t hash = fnv1a32(Line, stripeSize * screen.w *
+                                                          sizeof(Line[0]));
+                        if (hash == stripesHashes[tmpStripe]) {
+                            yStripe = y + 1;
+                            continue; // skip unchanged stripe
+                        }
+
+                        stripesHashes[tmpStripe] = hash;
+                    }
+
+                    screen.lineWritedCb(screen, yStripe, Line, stripeSize);
+
+                    yStripe = y + 1;
+                } else {
+                    currentLine++;
+                }
             } else {
                 auto *ptr = reinterpret_cast<SCREEN *>(screen.pixels);
                 memcpy(&ptr[y * screen.w], Line, sizeof(Line[0]) * screen.w);
             }
+        }
+
+        if (currentLine != 0 && screen.lineWritedCb != nullptr) {
+            uint32_t hash =
+                fnv1a32(Line, currentLine * screen.w * sizeof(Line[0]));
+
+            if (stripesHashes != nullptr) {
+                int tmpStripe = currentStripe;
+
+                if (hash == stripesHashes[tmpStripe]) {
+                    return; // skip unchanged stripe
+                }
+
+                stripesHashes[tmpStripe] = hash;
+            }
+            screen.lineWritedCb(screen, yStripe, Line, currentLine);
         }
     }
 };

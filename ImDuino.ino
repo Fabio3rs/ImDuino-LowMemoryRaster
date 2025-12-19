@@ -1,11 +1,13 @@
 #include "imgui.h"
 #include "softraster/softraster/color.h"
+#include <cstddef>
 #include <cstdint>
+#include <iterator>
 texture_alpha8_t fontAtlas;
 
 #include <Adafruit_GFX.h>
 #include <Adafruit_ILI9341.h>
-#include <Adafruit_STMPE610.h>
+#include <XPT2046_Touchscreen.h>
 #include <SPI.h>
 #include <Wire.h>
 
@@ -13,10 +15,38 @@ texture_alpha8_t fontAtlas;
 
 namespace {
 #define STMPE_CS 8
-Adafruit_STMPE610 ts = Adafruit_STMPE610(STMPE_CS);
-#define TFT_CS 5
-#define TFT_DC 4
-Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC);
+
+// ===== TFT ILI9341 (SPI) =====
+#define TFT_CS   27
+#define TFT_DC   26
+#define TFT_RST  33      // ou -1 se não estiver ligado
+#define TFT_BL   32      // opcional (PWM), ou direto em 3V3
+
+#define TFT_MOSI 23
+#define TFT_SCLK 18
+#define TFT_MISO 19
+
+// Rotação (0..3)
+#define TFT_ROTATION 1   // 1 ou 3 = landscape (320x240)
+
+#define TFT_NATIVE_W 240
+#define TFT_NATIVE_H 320
+
+// Se você quer trabalhar “fixo” em landscape:
+#define SCREEN_W 320
+#define SCREEN_H 240
+
+// ===== Touch XPT2046 (SPI compartilhado) =====
+#define TOUCH_CS   25
+#define TOUCH_IRQ  34    // opcional (se usar IRQ)
+
+// (opcional) frequência SPI para o ILI9341 no ESP32
+#define TFT_SPI_FREQ 40000000  // 40 MHz (padrão típico no ESP32)
+
+//  Adafruit_ILI9341(int8_t _CS, int8_t _DC, int8_t _MOSI, int8_t _SCLK,
+//                   int8_t _RST = -1, int8_t _MISO = -1);
+Adafruit_ILI9341 tft(TFT_CS, TFT_DC, TFT_RST);
+//XPT2046_Touchscreen ts(TOUCH_CS, TOUCH_IRQ);
 
 boolean RecordOn = false;
 
@@ -35,21 +65,34 @@ unsigned long lastRasterTime = 0;
 /*
  * @brief Draws one line
  */
-void drawLineCallback(texture_color16_t &screen, int y, const color16_t *Line) {
+void drawLineCallback(texture_color16_t &screen, int y, const color16_t *Line, int stripeSize) {
+    static int nextY = 0;
+    if (y == 0) {
+        nextY = 0;
+    }
+
+    if (y != nextY) {
+        // Serial.printf("Skipped line %d (expected %d)\n", y, nextY);
+        nextY = y + stripeSize;
+    }
+
+    tft.setAddrWindow(0, y, screen.w, stripeSize);
+
     rasterTime += micros() - lastRasterTime;
-    /*for (int16_t i = 0; i < screen.w; i++) {
-        tft.SPI_WRITE16(((const unsigned uint16_t *)Line)[i]);
-    }*/
-    tft.writePixels((uint16_t*)Line, screen.w);
+    tft.writePixels((uint16_t*)Line, screen.w * stripeSize, true, false);
     lastRasterTime = micros();
 }
 
 void screen_init() {
-    digitalWrite(22, LOW);
-    delay(500);
-    digitalWrite(22, HIGH);
+    //digitalWrite(22, LOW);
+    //delay(500);
+    //digitalWrite(22, HIGH);
+    Serial.begin(115200);
+    Serial.println("ILI9341 TFT + XPT2046 Touchscreen Test");
 
-    tft.begin();
+    tft.begin(); // You can pass in a specific SPI frequency
+
+    //tft.setAddrWindow(0, 0, SCREEN_W, SCREEN_H);
     tft.fillScreen(ILI9341_BLUE);
     // tft.setFont(Terminal6x8);
     tft.setRotation(3);
@@ -62,11 +105,20 @@ void screen_init() {
     screen.init(SCREENX, SCREENY, nullptr); // Sets the raster buffer as nullptr
 }
 
+template<class Arr, size_t N>
+size_t arrayElements(const Arr (&)[N]) {
+    return N;
+}
+
+size_t stripeLines = 16;
+size_t lineElements = SCREEN_W * stripeLines;
+color16_t *Line = new color16_t[lineElements];
+uint32_t *stripesHashes = new uint32_t[SCREEN_W / stripeLines + 1];
+
 void screen_draw() {
     rasterTime = 0;
     tft.startWrite();
-    tft.setAddrWindow(0, 0, screen.w, screen.h);
-    implRaster.ImGui_ImplSoftraster_RenderDrawData(ImGui::GetDrawData());
+    implRaster.ImGui_ImplSoftraster_RenderDrawData(ImGui::GetDrawData(), Line, lineElements, true);
     tft.endWrite();
 }
 
@@ -83,6 +135,7 @@ void setup() {
     context = ImGui::CreateContext();
 
     implRaster.ImGui_ImplSoftraster_Init(&screen);
+    implRaster.stripesHashes = stripesHashes;
 
     ImGuiStyle &style = ImGui::GetStyle();
     style.AntiAliasedLines = false;
@@ -107,6 +160,10 @@ void setup() {
 float f = 0.0f;
 unsigned long t = 0;
 
+// FPS Calc
+unsigned long frameCount = 0;
+unsigned long lastFPS = 0;
+
 void loop() {
     startRenderTime = millis();
     ImGuiIO &io = ImGui::GetIO();
@@ -115,6 +172,13 @@ void loop() {
     // io.MousePos = mouse_pos;
     // io.MouseDown[0] = mouse_button_0;
     // io.MouseDown[1] = mouse_button_1;
+
+    frameCount++;
+    if (millis() - lastFPS >= 1000) {
+        Serial.printf("FPS: %lu\n", frameCount);
+        lastFPS = millis();
+        frameCount = 0;
+    }
 
     /* [0.0f - 1.0f] */
     io.NavInputs[ImGuiNavInput_Activate] =

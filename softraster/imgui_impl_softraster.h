@@ -10,6 +10,7 @@
 template <class T> struct ImplSoftRaster {
     texture_t<T> *Screen{};
     SoftRaster<int32_t, T> raster;
+    uint32_t *stripesHashes{}; // optional, used only if useStripe=true
 
     bool ImGui_ImplSoftraster_Init(texture_t<T> *screen) {
         if (screen != nullptr) {
@@ -31,14 +32,17 @@ template <class T> struct ImplSoftRaster {
         io.DisplaySize.y = Screen->h;
     }
 
-    void ImGui_ImplSoftraster_RenderDrawData(ImDrawData *draw_data) {
+    void ImGui_ImplSoftraster_RenderDrawData(ImDrawData *draw_data, T *Line,
+                                             size_t lineElements,
+                                             bool useStripe = false) {
         if (Screen == nullptr) {
             return;
         }
 
         Screen->clear();
         raster.pscreen = Screen;
-        raster.template renderDrawLists<int32_t>(draw_data);
+        raster.template renderDrawLists<int32_t>(draw_data, Line, lineElements,
+                                                 useStripe, stripesHashes);
     }
 
     explicit constexpr ImplSoftRaster(texture_t<T> &screen) : Screen(&screen) {}
