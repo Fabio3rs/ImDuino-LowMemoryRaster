@@ -29,25 +29,19 @@ boolean RecordOn = false;
 texture_color16_t screen;
 ImplSoftRaster<color16_t> implRaster(screen);
 
-void drawRGBBitmap(int16_t x, int16_t y, const unsigned char *bitmap, int16_t w,
-                   int16_t h) {
-    tft.startWrite();
-    for (int16_t j = 0; j < h; j++, y++) {
-        for (int16_t i = 0; i < w; i++) {
-            int32_t pos = (j * w + i);
-            tft.writePixel(x + i, y, ((const unsigned uint16_t *)bitmap)[pos]);
-        }
-    }
-    tft.endWrite();
-}
+unsigned long rasterTime = 0;
+unsigned long lastRasterTime = 0;
 
 /*
  * @brief Draws one line
  */
 void drawLineCallback(texture_color16_t &screen, int y, const color16_t *Line) {
-    for (int16_t i = 0; i < screen.w; i++) {
+    rasterTime += micros() - lastRasterTime;
+    /*for (int16_t i = 0; i < screen.w; i++) {
         tft.SPI_WRITE16(((const unsigned uint16_t *)Line)[i]);
-    }
+    }*/
+    tft.writePixels((uint16_t*)Line, screen.w);
+    lastRasterTime = micros();
 }
 
 void screen_init() {
@@ -69,6 +63,7 @@ void screen_init() {
 }
 
 void screen_draw() {
+    rasterTime = 0;
     tft.startWrite();
     tft.setAddrWindow(0, 0, screen.w, screen.h);
     implRaster.ImGui_ImplSoftraster_RenderDrawData(ImGui::GetDrawData());
@@ -77,7 +72,7 @@ void screen_draw() {
 
 unsigned long drawTime;
 unsigned long renderTime;
-unsigned long rasterTime;
+unsigned long startRenderTime;
 
 ImGuiContext *context;
 } // namespace
@@ -105,12 +100,15 @@ void setup() {
     io.Fonts->TexID = &fontAtlas;
 
     screen_init();
+    lastRasterTime = micros();
+    startRenderTime = millis();
 }
 
 float f = 0.0f;
 unsigned long t = 0;
 
 void loop() {
+    startRenderTime = millis();
     ImGuiIO &io = ImGui::GetIO();
     io.DeltaTime = 1.0f / 60.0f;
 
@@ -156,22 +154,21 @@ void loop() {
     unsigned int deltaTime = millis() - t;
     t += deltaTime;
 
-    deltaTime -= (drawTime + renderTime + rasterTime);
+    unsigned long rasterTimeMs = rasterTime / 1000;
+
+    deltaTime -= (drawTime + renderTime + rasterTimeMs);
 
     ImGui::Text("Hardware write time %d ms", drawTime);
     ImGui::Text("Render time %d ms", renderTime);
-    ImGui::Text("Raster time %d ms", rasterTime);
+    ImGui::Text("Raster time %d ms", rasterTimeMs);
     ImGui::Text("Remaining time %d ms", deltaTime);
     ImGui::SliderFloat("SliderFloat", &f, 0.0f, 1.0f);
 
-    renderTime = millis();
     ImGui::Render();
-    renderTime = millis() - renderTime;
+    renderTime = millis() - startRenderTime;
 
     //  tft.startWrite();
-    rasterTime = millis();
     drawTime = millis();
     screen_draw();
     drawTime = millis() - drawTime;
-    rasterTime = millis() - rasterTime;
 }
