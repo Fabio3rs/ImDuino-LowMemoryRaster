@@ -7,6 +7,20 @@
 #include <cstddef>
 #include <utility>
 
+enum class underlying_storage : uint8_t {
+    little_endian,
+    big_endian
+};
+
+static inline constexpr underlying_storage CURRENT_STORAGE = underlying_storage::big_endian;
+
+static inline uint16_t adjust_endian(uint16_t v) {
+    if constexpr (CURRENT_STORAGE == underlying_storage::big_endian) {
+        return (v >> 8) | (v << 8);
+    }
+    return v;
+}
+
 #define C16RMASK 0xF800
 #define C16GMASK 0x07E0
 #define C16BMASK 0x001F
@@ -218,18 +232,16 @@ void WRITE_COLOR16FN(size_t ix, size_t iy, const color32_t *ref);
 
 struct color16_t
 {
-    uint16_t rgb;
-
     color16_t() = default;
-    color16_t(const uint16_t val) : rgb(val) {}
-    color16_t(const signed int val) : rgb(val) {}
-    color16_t(const unsigned int val) : rgb(val) {}
+    color16_t(const uint16_t val) : rgb(adjust_endian(val)) {}
+    color16_t(const signed int val) : rgb(adjust_endian(val)) {}
+    color16_t(const unsigned int val) : rgb(adjust_endian(val)) {}
     color16_t(const color16_t &rhs) : rgb(rhs.rgb) {}
 
     template<typename COLOR>
-    explicit inline color16_t(const COLOR &rhs) : rgb(rhs.RGB16()) { }
+    explicit inline color16_t(const COLOR &rhs) : rgb(adjust_endian(rhs.RGB16())) { }
 
-    template<typename COLOR> inline color16_t &operator=(const COLOR &rhs) { rgb = rhs.RGB16();
+    template<typename COLOR> inline color16_t &operator=(const COLOR &rhs) { rgb = adjust_endian(rhs.RGB16());
    // WRITE_COLOR16FN(0, 0, this);
      return *this; }
     template<typename T> inline color16_t &operator+=(const T &rhs) { return *this = *this + rhs; }
@@ -239,14 +251,23 @@ struct color16_t
     inline bool operator==(const color16_t &rhs) const { return rgb == rhs.rgb; }
     inline bool operator!=(const color16_t &rhs) const { return rgb != rhs.rgb; }
 
-    inline uint8_t R() const { return ((C16R(rgb) >> 0xB) * 0xFF) / 0x1F; }
-    inline uint8_t G() const { return ((C16G(rgb) >> 0x5) * 0xFF) / 0x3F; }
-    inline uint8_t B() const { return  (C16B(rgb)         * 0xFF) / 0x1F; }
+    inline uint8_t R() const { return ((C16R(value()) >> 0xB) * 0xFF) / 0x1F; }
+    inline uint8_t G() const { return ((C16G(value()) >> 0x5) * 0xFF) / 0x3F; }
+    inline uint8_t B() const { return  (C16B(value())         * 0xFF) / 0x1F; }
     inline uint8_t A() const { return 0xFF; }
     inline uint8_t V() const { return (R() + G() + B()) / 3; }
-    inline uint16_t RGB16() const { return rgb; }
+    inline uint16_t RGB16() const { return adjust_endian(rgb); }
     inline uint32_t RGBA32() const { return (R() << 24) | (G() << 16) | (B() << 8) | 0xFF; }
+
+    inline uint16_t value() const { return adjust_endian(rgb); }
+    inline void value(uint16_t val) { rgb = adjust_endian(val); }
+
+protected:
+    uint16_t rgb;
 };
+
+
+static_assert(sizeof(color16_t) == 2, "color16_t must be 2 bytes");
 
 
 template<typename NCOLOR>
@@ -299,12 +320,12 @@ struct color16_alpha8_t
     inline bool operator==(const color16_alpha8_t &rhs) const { return color == rhs.color && alpha == rhs.alpha; }
     inline bool operator!=(const color16_alpha8_t &rhs) const { return color != rhs.color || alpha != rhs.alpha; }
 
-    inline uint8_t R() const { return ((C16R(color.rgb) >> 0xB) * 0xFF) / 0x1F; }
-    inline uint8_t G() const { return ((C16G(color.rgb) >> 0x5) * 0xFF) / 0x3F; }
-    inline uint8_t B() const { return  (C16B(color.rgb)         * 0xFF) / 0x1F; }
+    inline uint8_t R() const { return ((C16R(color.value()) >> 0xB) * 0xFF) / 0x1F; }
+    inline uint8_t G() const { return ((C16G(color.value()) >> 0x5) * 0xFF) / 0x3F; }
+    inline uint8_t B() const { return  (C16B(color.value())         * 0xFF) / 0x1F; }
     inline uint8_t A() const { return alpha.a; }
     inline uint8_t V() const { return (R() + G() + B()) / 3; }
-    inline uint16_t RGB16() const { return color.rgb; }
+    inline uint16_t RGB16() const { return color.value(); }
     inline uint32_t RGBA32() const { return (R() << 24) | (G() << 16) | (B() << 8) | alpha.a; }
 };
 
@@ -384,17 +405,17 @@ inline value8_t         operator+(value8_t          lhs, const value8_t         
 
 inline color16_t        operator+(color16_t         lhs, const color16_t        &rhs)
 {
-    lhs.rgb =   C16R(C16R(lhs.rgb) + C16R(rhs.rgb)) |
-                C16G(C16G(lhs.rgb) + C16G(rhs.rgb)) |
-                C16B(C16B(lhs.rgb) + C16B(rhs.rgb));
+    lhs.value(C16R(C16R(lhs.value()) + C16R(rhs.value())) |
+               C16G(C16G(lhs.value()) + C16G(rhs.value())) |
+               C16B(C16B(lhs.value()) + C16B(rhs.value())));
     return lhs;
 }
 
 inline color16_alpha8_t operator+(color16_alpha8_t  lhs, const color16_alpha8_t &rhs)
 {
-    lhs.color.rgb = C16R(C16R(lhs.color.rgb) + C16R(rhs.color.rgb)) |
-                    C16G(C16G(lhs.color.rgb) + C16G(rhs.color.rgb)) |
-                    C16B(C16B(lhs.color.rgb) + C16B(rhs.color.rgb));
+    lhs.color.value(C16R(C16R(lhs.color.value()) + C16R(rhs.color.value())) |
+                    C16G(C16G(lhs.color.value()) + C16G(rhs.color.value())) |
+                    C16B(C16B(lhs.color.value()) + C16B(rhs.color.value())));
     lhs.alpha.a += rhs.alpha.a;
     return lhs;
 }
@@ -433,17 +454,17 @@ inline value8_t         operator*(value8_t          lhs, const float rhs)
 
 inline color16_t        operator*(color16_t         lhs, const float rhs)
 {
-    lhs.rgb =   C16R(static_cast<uint8_t>(C16R(lhs.rgb) * rhs)) |
-                C16G(static_cast<uint8_t>(C16G(lhs.rgb) * rhs)) |
-                C16B(static_cast<uint8_t>(C16B(lhs.rgb) * rhs));
+    lhs.value(C16R(static_cast<uint8_t>(C16R(lhs.value()) * rhs)) |
+               C16G(static_cast<uint8_t>(C16G(lhs.value()) * rhs)) |
+               C16B(static_cast<uint8_t>(C16B(lhs.value()) * rhs)));
     return lhs;
 }
 
 inline color16_alpha8_t operator*(color16_alpha8_t  lhs, const float rhs)
 {
-    lhs.color.rgb = C16R(static_cast<uint8_t>(C16R(lhs.color.rgb) * rhs)) |
-                    C16G(static_cast<uint8_t>(C16G(lhs.color.rgb) * rhs)) |
-                    C16B(static_cast<uint8_t>(C16B(lhs.color.rgb) * rhs));
+    lhs.color.value(C16R(static_cast<uint8_t>(C16R(lhs.color.value()) * rhs)) |
+                    C16G(static_cast<uint8_t>(C16G(lhs.color.value()) * rhs)) |
+                    C16B(static_cast<uint8_t>(C16B(lhs.color.value()) * rhs)));
     lhs.alpha.a *= rhs;
     return lhs;
 }
@@ -479,17 +500,17 @@ inline value8_t         operator*(const float lhs, value8_t          rhs)
 
 inline color16_t        operator*(const float lhs, color16_t         rhs)
 {
-    rhs.rgb =   C16R(static_cast<uint8_t>(C16R(rhs.rgb) * lhs)) |
-                C16G(static_cast<uint8_t>(C16G(rhs.rgb) * lhs)) |
-                C16B(static_cast<uint8_t>(C16B(rhs.rgb) * lhs));
+    rhs.value(C16R(static_cast<uint8_t>(C16R(rhs.value()) * lhs)) |
+              C16G(static_cast<uint8_t>(C16G(rhs.value()) * lhs)) |
+              C16B(static_cast<uint8_t>(C16B(rhs.value()) * lhs)));
     return rhs;
 }
 
 inline color16_alpha8_t operator*(const float lhs, color16_alpha8_t  rhs)
 {
-    rhs.color.rgb = C16R(static_cast<uint8_t>(C16R(rhs.color.rgb) * lhs)) |
-                    C16G(static_cast<uint8_t>(C16G(rhs.color.rgb) * lhs)) |
-                    C16B(static_cast<uint8_t>(C16B(rhs.color.rgb) * lhs));
+    rhs.color.value(C16R(static_cast<uint8_t>(C16R(rhs.color.value()) * lhs)) |
+                    C16G(static_cast<uint8_t>(C16G(rhs.color.value()) * lhs)) |
+                    C16B(static_cast<uint8_t>(C16B(rhs.color.value()) * lhs)));
     rhs.alpha.a *= lhs;
     return rhs;
 }
@@ -558,9 +579,9 @@ inline value8_t         operator*(      value8_t   lhs, const value8_t  &rhs)
 inline color16_t        operator*(const value8_t  &lhs,       color16_t  rhs)
 {
     const uint16_t v = lhs.RGB16();
-    rhs.rgb =   C16R((C16R(rhs.rgb) * (C16R(v) >> 0xB)) / 0x1FU) |
-                C16G((C16G(rhs.rgb) * (C16G(v) >> 0x5)) / 0x3FU) |
-                C16B((C16B(rhs.rgb) * (C16B(v) >> 0x0)) / 0x1FU);
+    rhs.value(C16R((C16R(rhs.value()) * (C16R(v) >> 0xB)) / 0x1FU) |
+                C16G((C16G(rhs.value()) * (C16G(v) >> 0x5)) / 0x3FU) |
+                C16B((C16B(rhs.value()) * (C16B(v) >> 0x0)) / 0x1FU));
     return rhs;
 }
 
@@ -590,17 +611,17 @@ inline color16_alpha8_t operator*(const color16_t &lhs, const alpha8_t  &rhs)
 inline color16_t        operator*(      color16_t  lhs, const value8_t  &rhs)
 {
     const uint16_t v = rhs.RGB16();
-    lhs.rgb =   C16R((C16R(lhs.rgb) * (C16R(v) >> 0xB)) / 0x1FU) |
-                C16G((C16G(lhs.rgb) * (C16G(v) >> 0x5)) / 0x3FU) |
-                C16B((C16B(lhs.rgb) * (C16B(v) >> 0x0)) / 0x1FU);
+    lhs.value(C16R((C16R(lhs.value()) * (C16R(v) >> 0xB)) / 0x1FU) |
+                C16G((C16G(lhs.value()) * (C16G(v) >> 0x5)) / 0x3FU) |
+                C16B((C16B(lhs.value()) * (C16B(v) >> 0x0)) / 0x1FU));
     return lhs;
 }
 
 inline color16_t        operator*(      color16_t  lhs, const color16_t &rhs)
 {
-    lhs.rgb =   C16R((C16R(lhs.rgb) * (C16R(rhs.rgb) >> 0xB)) / 0x1FU) |
-                C16G((C16G(lhs.rgb) * (C16G(rhs.rgb) >> 0x5)) / 0x3FU) |
-                C16B((C16B(lhs.rgb) * (C16B(rhs.rgb) >> 0x0)) / 0x1FU);
+    lhs.value(C16R((C16R(lhs.value()) * (C16R(rhs.value()) >> 0xB)) / 0x1FU) |
+                C16G((C16G(lhs.value()) * (C16G(rhs.value()) >> 0x5)) / 0x3FU) |
+                C16B((C16B(lhs.value()) * (C16B(rhs.value()) >> 0x0)) / 0x1FU));
     return lhs;
 }
 
@@ -897,9 +918,9 @@ inline color32_t        operator%(const value8_t  &lhs,       color32_t  rhs)
 
 inline color16_t        operator%(      color16_t  lhs, const alpha8_t  &rhs)
 {
-    lhs.rgb =   C16R(C16R(lhs.rgb) + ((rhs.a * (C16RMASK - C16R(lhs.rgb))) / 0xFFU)) |
-                C16G(C16G(lhs.rgb) + ((rhs.a * (C16GMASK - C16G(lhs.rgb))) / 0xFFU)) |
-                C16B(C16B(lhs.rgb) + ((rhs.a * (C16BMASK - C16B(lhs.rgb))) / 0xFFU));
+    lhs.value(C16R(C16R(lhs.value()) + ((rhs.a * (C16RMASK - C16R(lhs.value()))) / 0xFFU)) |
+                C16G(C16G(lhs.value()) + ((rhs.a * (C16GMASK - C16G(lhs.value()))) / 0xFFU)) |
+                C16B(C16B(lhs.value()) + ((rhs.a * (C16BMASK - C16B(lhs.value()))) / 0xFFU)));
     return lhs;
 }
 
@@ -1074,9 +1095,9 @@ inline color16_alpha8_t operator%(color16_alpha8_t lhs, const color16_alpha8_t &
     }
     else if (lhs.alpha.a == 0xFFU)
     {
-        lhs.color.rgb = C16R(((C16R(lhs.color.rgb) * (0xFFU - rhs.alpha.a)) + (C16R(rhs.color.rgb) * rhs.alpha.a)) / 0xFFU) |
-                        C16G(((C16G(lhs.color.rgb) * (0xFFU - rhs.alpha.a)) + (C16G(rhs.color.rgb) * rhs.alpha.a)) / 0xFFU) |
-                        C16B(((C16B(lhs.color.rgb) * (0xFFU - rhs.alpha.a)) + (C16B(rhs.color.rgb) * rhs.alpha.a)) / 0xFFU);
+        lhs.color.value(C16R(((C16R(lhs.color.value()) * (0xFFU - rhs.alpha.a)) + (C16R(rhs.color.value()) * rhs.alpha.a)) / 0xFFU) |
+                        C16G(((C16G(lhs.color.value()) * (0xFFU - rhs.alpha.a)) + (C16G(rhs.color.value()) * rhs.alpha.a)) / 0xFFU) |
+                        C16B(((C16B(lhs.color.value()) * (0xFFU - rhs.alpha.a)) + (C16B(rhs.color.value()) * rhs.alpha.a)) / 0xFFU));
         lhs.alpha = lhs.alpha % rhs.alpha;
     }
     else
@@ -1084,9 +1105,9 @@ inline color16_alpha8_t operator%(color16_alpha8_t lhs, const color16_alpha8_t &
         const uint8_t outA = (lhs.alpha % rhs.alpha).a;
         if (outA)
         {
-            lhs.color.rgb = C16R(((((C16R(lhs.color.rgb) * lhs.alpha.a) / 0xFFU) * (0xFFU - rhs.alpha.a)) + (C16R(rhs.color.rgb) * rhs.alpha.a)) / outA) |
-                            C16G(((((C16G(lhs.color.rgb) * lhs.alpha.a) / 0xFFU) * (0xFFU - rhs.alpha.a)) + (C16G(rhs.color.rgb) * rhs.alpha.a)) / outA) |
-                            C16B(((((C16B(lhs.color.rgb) * lhs.alpha.a) / 0xFFU) * (0xFFU - rhs.alpha.a)) + (C16B(rhs.color.rgb) * rhs.alpha.a)) / outA);
+            lhs.color.value(C16R(((((C16R(lhs.color.value()) * lhs.alpha.a) / 0xFFU) * (0xFFU - rhs.alpha.a)) + (C16R(rhs.color.value()) * rhs.alpha.a)) / outA) |
+                            C16G(((((C16G(lhs.color.value()) * lhs.alpha.a) / 0xFFU) * (0xFFU - rhs.alpha.a)) + (C16G(rhs.color.value()) * rhs.alpha.a)) / outA) |
+                            C16B(((((C16B(lhs.color.value()) * lhs.alpha.a) / 0xFFU) * (0xFFU - rhs.alpha.a)) + (C16B(rhs.color.value()) * rhs.alpha.a)) / outA));
         }
         lhs.alpha.a = outA;
     }
@@ -1157,9 +1178,9 @@ inline color16_alpha8_t operator%(const alpha8_t  &lhs, color16_alpha8_t rhs)
     }
     else if (lhs.a == 0xFFU)
     {
-        rhs.color.rgb = C16R(((C16RMASK * (0xFFU - rhs.alpha.a)) + (C16R(rhs.color.rgb) * rhs.alpha.a)) / 0xFFU) |
-                        C16G(((C16GMASK * (0xFFU - rhs.alpha.a)) + (C16G(rhs.color.rgb) * rhs.alpha.a)) / 0xFFU) |
-                        C16B(((C16BMASK * (0xFFU - rhs.alpha.a)) + (C16B(rhs.color.rgb) * rhs.alpha.a)) / 0xFFU);
+        rhs.color.value(C16R(((C16RMASK * (0xFFU - rhs.alpha.a)) + (C16R(rhs.color.value()) * rhs.alpha.a)) / 0xFFU) |
+                        C16G(((C16GMASK * (0xFFU - rhs.alpha.a)) + (C16G(rhs.color.value()) * rhs.alpha.a)) / 0xFFU) |
+                        C16B(((C16BMASK * (0xFFU - rhs.alpha.a)) + (C16B(rhs.color.value()) * rhs.alpha.a)) / 0xFFU));
         rhs.alpha = lhs % rhs.alpha;
     }
     else
@@ -1167,9 +1188,9 @@ inline color16_alpha8_t operator%(const alpha8_t  &lhs, color16_alpha8_t rhs)
         const uint8_t outA = (lhs % rhs.alpha).a;
         if (outA)
         {
-            rhs.color.rgb = C16R(((((C16RMASK * lhs.a) / 0xFFU) * (0xFFU - rhs.alpha.a)) + (C16R(rhs.color.rgb) * rhs.alpha.a)) / outA) |
-                            C16G(((((C16GMASK * lhs.a) / 0xFFU) * (0xFFU - rhs.alpha.a)) + (C16G(rhs.color.rgb) * rhs.alpha.a)) / outA) |
-                            C16B(((((C16BMASK * lhs.a) / 0xFFU) * (0xFFU - rhs.alpha.a)) + (C16B(rhs.color.rgb) * rhs.alpha.a)) / outA);
+            rhs.color.value(C16R(((((C16RMASK * lhs.a) / 0xFFU) * (0xFFU - rhs.alpha.a)) + (C16R(rhs.color.value()) * rhs.alpha.a)) / outA) |
+                            C16G(((((C16GMASK * lhs.a) / 0xFFU) * (0xFFU - rhs.alpha.a)) + (C16G(rhs.color.value()) * rhs.alpha.a)) / outA) |
+                            C16B(((((C16BMASK * lhs.a) / 0xFFU) * (0xFFU - rhs.alpha.a)) + (C16B(rhs.color.value()) * rhs.alpha.a)) / outA));
         }
         rhs.alpha.a = outA;
     }
@@ -1188,9 +1209,9 @@ inline color16_t        operator%(const value8_t  &lhs, color16_alpha8_t rhs)
     }
     else
     {
-        rhs.color.rgb = C16R(((((C16RMASK * lhs.v) / 0xFFU) * (0xFFU - rhs.alpha.a)) + (C16R(rhs.color.rgb) * rhs.alpha.a)) / 0xFFU) |
-                        C16G(((((C16GMASK * lhs.v) / 0xFFU) * (0xFFU - rhs.alpha.a)) + (C16G(rhs.color.rgb) * rhs.alpha.a)) / 0xFFU) |
-                        C16B(((((C16BMASK * lhs.v) / 0xFFU) * (0xFFU - rhs.alpha.a)) + (C16B(rhs.color.rgb) * rhs.alpha.a)) / 0xFFU);
+        rhs.color.value(C16R(((((C16RMASK * lhs.v) / 0xFFU) * (0xFFU - rhs.alpha.a)) + (C16R(rhs.color.value()) * rhs.alpha.a)) / 0xFFU) |
+                        C16G(((((C16GMASK * lhs.v) / 0xFFU) * (0xFFU - rhs.alpha.a)) + (C16G(rhs.color.value()) * rhs.alpha.a)) / 0xFFU) |
+                        C16B(((((C16BMASK * lhs.v) / 0xFFU) * (0xFFU - rhs.alpha.a)) + (C16B(rhs.color.value()) * rhs.alpha.a)) / 0xFFU));
     }
     return rhs.color;
 }
@@ -1207,9 +1228,9 @@ inline color16_t        operator%(      color16_t  lhs, const color16_alpha8_t &
     }
     else
     {
-        lhs.rgb =   C16R(((C16R(lhs.rgb) * (0xFFU - rhs.alpha.a)) + (C16R(rhs.color.rgb) * rhs.alpha.a)) / 0xFFU) |
-                    C16G(((C16G(lhs.rgb) * (0xFFU - rhs.alpha.a)) + (C16G(rhs.color.rgb) * rhs.alpha.a)) / 0xFFU) |
-                    C16B(((C16B(lhs.rgb) * (0xFFU - rhs.alpha.a)) + (C16B(rhs.color.rgb) * rhs.alpha.a)) / 0xFFU);
+        lhs.value(C16R(((C16R(lhs.value()) * (0xFFU - rhs.alpha.a)) + (C16R(rhs.color.value()) * rhs.alpha.a)) / 0xFFU) |
+                    C16G(((C16G(lhs.value()) * (0xFFU - rhs.alpha.a)) + (C16G(rhs.color.value()) * rhs.alpha.a)) / 0xFFU) |
+                    C16B(((C16B(lhs.value()) * (0xFFU - rhs.alpha.a)) + (C16B(rhs.color.value()) * rhs.alpha.a)) / 0xFFU));
     }
     return lhs;
 }
