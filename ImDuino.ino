@@ -249,7 +249,7 @@ template <class Arr, size_t N> size_t arrayElements(const Arr (&)[N]) {
 
 size_t stripeLines = 16;
 size_t lineElements = SCREEN_W * stripeLines;
-color16_t *Line = new color16_t[lineElements];
+//color16_t *Line = new color16_t[lineElements];
 uint32_t *stripesHashes = new uint32_t[SCREEN_W / stripeLines + 1];
 
 static void touch_idf_init(spi_host_device_t host) {
@@ -296,7 +296,7 @@ void screen_init() {
     lcd.setMaxTransferBytes(SCREEN_W * stripeLines * 2);
     // dmaBufWords_ no header está como 320*16; ajuste se seu W/stripe variam.
     lcd.begin(p, SCREEN_W, SCREEN_H, SPI2_HOST, TFT_SPI_FREQ,
-              /*queueDepth*/ 4, /*NO_DUMMY*/ true);
+              /*queueDepth*/ 2, /*NO_DUMMY*/ true);
     lcd.setRotation(TFT_ROTATION);
 
     touch_idf_init(SPI2_HOST);
@@ -311,12 +311,19 @@ void screen_init() {
     screen.init(SCREENX, SCREENY, nullptr); // Sets the raster buffer as nullptr
 }
 
+color16_t *get_available_buffer(size_t *size = nullptr) {
+    if (size) {
+        *size = lineElements;
+    }
+    return reinterpret_cast<color16_t *>(lcd.getCurrentDMABuffer());
+}
+
 void screen_draw() {
     rasterTime = 0;
     lcd.beginFrame(true);
     lcd.waitAll();
-    implRaster.ImGui_ImplSoftraster_RenderDrawData(ImGui::GetDrawData(), Line,
-                                                   lineElements, true);
+    implRaster.ImGui_ImplSoftraster_RenderDrawData(ImGui::GetDrawData(),
+                                                   get_available_buffer, true);
     lcd.waitAll();
     lcd.endFrame();
 }
@@ -368,7 +375,7 @@ void setup() {
     Serial.printf("%dMB %s flash\n", spi_flash_get_chip_size() / (1024 * 1024),
                   (chip_info.features & CHIP_FEATURE_EMB_FLASH) ? "embedded"
                                                                 : "external");
-    Serial.printf("Heap size: %d bytes\n", esp_get_free_heap_size());
+    Serial.printf("Heap size (free): %d bytes\n", esp_get_free_heap_size());
 }
 
 float f = 0.0f;

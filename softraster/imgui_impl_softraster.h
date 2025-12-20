@@ -32,8 +32,8 @@ template <class T> struct ImplSoftRaster {
         io.DisplaySize.y = Screen->h;
     }
 
-    void ImGui_ImplSoftraster_RenderDrawData(ImDrawData *draw_data, T *Line,
-                                             size_t lineElements,
+    void ImGui_ImplSoftraster_RenderDrawData(ImDrawData *draw_data,
+                                             T *get_buffer(size_t *size),
                                              bool useStripe = false) {
         if (Screen == nullptr) {
             return;
@@ -41,7 +41,8 @@ template <class T> struct ImplSoftRaster {
 
         Screen->clear();
         raster.pscreen = Screen;
-        raster.template renderDrawLists<int32_t>(draw_data, Line, lineElements,
+
+        raster.template renderDrawLists<int32_t>(draw_data, get_buffer,
                                                  useStripe, stripesHashes);
     }
 

@@ -139,9 +139,21 @@ class ILI9341_DMA {
         cmd_(0x2C); // RAMWR
     }
 
+    uint16_t *getDMABuffer(int slot) {
+        if (slot < 0 || slot >= qDepth_)
+            return nullptr;
+        return dmaBuf_[slot];
+    }
+
+    uint16_t *getCurrentDMABuffer() {
+        return dmaBuf_[head_];
+    }
+
     // Enfileira pixels (RGB565). Se swapBytes=true, converte little->big
     // durante a cópia para o buffer DMA. Retorna quando a transação foi
     // enfileirada (DMA segue “em segundo plano”).
+    // Se gravar diretamente no buffer DMA, não haverá cópia (mas cuidado para
+    // não sobrescrever enquanto a transação anterior não completar).
     inline void pushPixelsAsync(const uint16_t *pixels, size_t count,
                                 bool swapBytes = true) {
         // precisa de slot livre; se ring lotar, espera 1 completar
@@ -157,12 +169,15 @@ class ILI9341_DMA {
             count = dmaBufWords_;
         }
 
-        if (swapBytes) {
-            for (size_t i = 0; i < count; i++) {
-                dst[i] = __builtin_bswap16(pixels[i]);
+        // Se os pixels não são o ponteiro do buffer DMA, copia para lá
+        if (pixels != dst) {
+            if (swapBytes) {
+                for (size_t i = 0; i < count; i++) {
+                    dst[i] = __builtin_bswap16(pixels[i]);
+                }
+            } else {
+                memcpy(dst, pixels, count * sizeof(uint16_t));
             }
-        } else {
-            memcpy(dst, pixels, count * sizeof(uint16_t));
         }
 
         spi_transaction_t *t = &trans_[slot];

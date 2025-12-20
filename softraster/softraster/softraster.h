@@ -837,8 +837,7 @@ template <typename POS_T, class SCREEN> struct SoftRaster {
     }
 
     template <typename POS>
-    void renderDrawLists(ImDrawData *drawData, SCREEN *Line,
-                         size_t lineElements, bool useStripe,
+    void renderDrawLists(ImDrawData *drawData, SCREEN *get_buffer(size_t *size), bool useStripe,
                          uint32_t *stripesHashes = nullptr) {
         ImGuiIO &io = ImGui::GetIO();
         int fbWidth = (int)(io.DisplaySize.x * io.DisplayFramebufferScale.x);
@@ -847,6 +846,8 @@ template <typename POS_T, class SCREEN> struct SoftRaster {
             return;
         drawData->ScaleClipRects(io.DisplayFramebufferScale);
 
+        size_t lineElements = 0;
+        auto *Line = get_buffer(&lineElements);
         pLine = Line;
 
         auto &screen = *pscreen;
@@ -922,6 +923,9 @@ template <typename POS_T, class SCREEN> struct SoftRaster {
                     }
 
                     screen.lineWritedCb(screen, yStripe, Line, stripeSize);
+
+                    Line = get_buffer(&lineElements);
+                    pLine = Line;
 
                     yStripe = y + 1;
                 } else {
